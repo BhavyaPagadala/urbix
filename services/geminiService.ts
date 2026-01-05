@@ -1,11 +1,31 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Sentiment } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+// Initialize lazily or checking for key to prevent crash on load
+const getAiClient = () => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn("VITE_GEMINI_API_KEY is not set. AI features will use fallback data.");
+    return null;
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 export const analyzeCivicReport = async (text: string, imageData?: string) => {
-  const model = "gemini-3-pro-preview";
+  const ai = getAiClient();
+  if (!ai) {
+    return {
+      title: "Simulation: Pothole on Main St",
+      description: "This is a simulated analysis because the AI API key is missing.",
+      category: "Roads & Infrastructure",
+      department: "Public Works",
+      sentiment: Sentiment.NEGATIVE,
+      summary: "Simulated report analysis.",
+      priority: "High"
+    };
+  }
+
+  const model = "gemini-1.5-flash"; // updated model name for better availability
 
   const promptText = `
     You are an expert urban intelligence analyst. Analyze this civic report.
@@ -43,7 +63,6 @@ export const analyzeCivicReport = async (text: string, imageData?: string) => {
     model,
     contents: { parts: contents },
     config: {
-      thinkingConfig: { thinkingBudget: 4000 },
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -80,12 +99,15 @@ export const analyzeCivicReport = async (text: string, imageData?: string) => {
 };
 
 export const generateUrbanPulseSummary = async (reports: any[]) => {
-  const model = "gemini-3-flash-preview";
+  const ai = getAiClient();
+  if (!ai) return "Simulated urban pulse summary due to missing API key.";
+
+  const model = "gemini-1.5-flash";
   const reportData = reports.slice(0, 10).map(r => `${r.category} (${r.status}): ${r.sentiment}`).join(', ');
 
   const response = await ai.models.generateContent({
     model,
-    contents: `Urban Data Stream: ${reportData}. Synthesize a high-level, 1-sentence urban health summary.`,
+    contents: { parts: [{ text: `Urban Data Stream: ${reportData}. Synthesize a high-level, 1-sentence urban health summary.` }] },
   });
 
   return response.text;
