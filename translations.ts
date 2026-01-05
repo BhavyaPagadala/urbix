@@ -1,0 +1,68 @@
+
+export type Language = 'en' | 'hi' | 'te';
+
+export const translations = {
+  en: {
+    welcome: "Hello",
+    subWelcomeCitizen: "Help make your city better. Every report helps.",
+    subWelcomeAdmin: "Check reports and fix city problems.",
+    reportIssue: "Report a Problem",
+    issueTitle: "What is wrong?",
+    issueDesc: "Write details here",
+    locality: "Area",
+    evidence: "Photo",
+    submit: "Send Report",
+    incidentLog: "Your Reports",
+    aiInsight: "AI Note",
+    department: "Department",
+    status: "Status",
+    systemStatus: "System: Working",
+    totalReports: "Total Reports",
+    unresolved: "Not Fixed",
+    resRate: "Fixed Rate",
+    critical: "Urgent",
+    pulse: "City Summary by AI"
+  },
+  hi: {
+    welcome: "वापसी पर स्वागत है",
+    subWelcomeCitizen: "अपने समुदाय को बेहतर बनाने में मदद करें। हर रिपोर्ट मायने रखती है।",
+    subWelcomeAdmin: "आपके नामित शहर क्षेत्र के लिए विश्लेषणात्मक निरीक्षण।",
+    reportIssue: "मुद्दा रिपोर्ट करें",
+    issueTitle: "क्या समस्या है?",
+    issueDesc: "विस्तार से वर्णन करें",
+    locality: "इलाका",
+    evidence: "सबूत",
+    submit: "इंटेल जमा करें",
+    incidentLog: "घटना लॉग",
+    aiInsight: "एआई इंटेलिजेंस टैग",
+    department: "विभाग",
+    status: "स्थिति",
+    systemStatus: "सिस्टम स्थिति: सिंक्रोनाइज़्ड",
+    totalReports: "कुल रिपोर्ट",
+    unresolved: "अनसुलझे",
+    resRate: "समाधान दर",
+    critical: "गंभीर मुद्दे",
+    pulse: "अर्बन पल्स एआई विश्लेषण"
+  },
+  te: {
+    welcome: "తిరిగి స్వాగతం",
+    subWelcomeCitizen: "మీ కమ్యూనిటీని మెరుగుపరచడంలో సహాయపడండి. ప్రతి నివేదిక ముఖ్యం.",
+    subWelcomeAdmin: "మీ నియమిత నగర విభాగం కోసం విశ్లేషణాత్మక పర్యవేక్షణ.",
+    reportIssue: "సమస్యను నివేదించండి",
+    issueTitle: "సమస్య ఏమిటి?",
+    issueDesc: "వివరంగా వివరించండి",
+    locality: "ప్రాంతం",
+    evidence: "సాక్ష్యం",
+    submit: "సమర్పించండి",
+    incidentLog: "సంఘటన లాగ్",
+    aiInsight: "AI ఇంటెలిజెన్స్ ట్యాగ్",
+    department: "శాఖ",
+    status: "స్థితి",
+    systemStatus: "సిస్టమ్ స్థితి: సమకాలీకరించబడింది",
+    totalReports: "మొత్తం నివేదికలు",
+    unresolved: "పరిష్కరించనివి",
+    resRate: "పరిష్కార రేటు",
+    critical: "క్లిష్టమైన సమస్యలు",
+    pulse: "అర్బన్ పల్స్ AI విశ్లేషణ"
+  }
+};

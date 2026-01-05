@@ -1,0 +1,8 @@
+
+{
+  "name": "Urbix - Civic Intelligence Platform",
+  "description": "An AI-powered civic engagement platform for real-time public issue reporting, sentiment analysis, and urban trend detection.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
