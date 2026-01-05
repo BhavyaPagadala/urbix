@@ -2,11 +2,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Sentiment } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
 export const analyzeCivicReport = async (text: string, imageData?: string) => {
   const model = "gemini-3-pro-preview";
-  
+
   const promptText = `
     You are an expert urban intelligence analyst. Analyze this civic report.
     User Input: "${text || "No text provided."}"
@@ -24,7 +24,7 @@ export const analyzeCivicReport = async (text: string, imageData?: string) => {
   `;
 
   const contents: any[] = [{ text: promptText }];
-  
+
   if (imageData) {
     const base64Data = imageData.includes(',') ? imageData.split(',')[1] : imageData;
     let mimeType = "image/jpeg";
@@ -82,7 +82,7 @@ export const analyzeCivicReport = async (text: string, imageData?: string) => {
 export const generateUrbanPulseSummary = async (reports: any[]) => {
   const model = "gemini-3-flash-preview";
   const reportData = reports.slice(0, 10).map(r => `${r.category} (${r.status}): ${r.sentiment}`).join(', ');
-  
+
   const response = await ai.models.generateContent({
     model,
     contents: `Urban Data Stream: ${reportData}. Synthesize a high-level, 1-sentence urban health summary.`,
