@@ -10,8 +10,9 @@ import { ADMIN_SECRET_KEY, MOCK_REPORTS_INITIAL } from './constants';
 import { generateUrbanPulseSummary, analyzeCivicReport } from './services/geminiService';
 import { Logo } from './components/Logo';
 import { Language, translations } from './translations';
-import { db } from './services/firebase';
-import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, Timestamp, setDoc } from 'firebase/firestore';
+import { db, auth } from './services/firebase';
+import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, Timestamp, setDoc, getDoc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 
 const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
@@ -22,6 +23,7 @@ const App: React.FC = () => {
   const [language, setLanguage] = useState<Language>('en');
   const t = translations[language];
 
+  // Auth Form State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -29,19 +31,37 @@ const App: React.FC = () => {
   const [role, setRole] = useState<UserRole>(UserRole.CITIZEN);
   const [adminKey, setAdminKey] = useState('');
 
+  // Listen to Auth State Changes
   useEffect(() => {
-    // Load user from local storage
-    try {
-      const savedUser = localStorage.getItem('urbix_user');
-      if (savedUser) {
-        setUser(JSON.parse(savedUser));
-        setView('main');
+    const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
+      if (authUser) {
+        try {
+          // Fetch extra user details from Firestore
+          const userDoc = await getDoc(doc(db, "users", authUser.uid));
+          if (userDoc.exists()) {
+            setUser(userDoc.data() as User);
+            setView('main');
+          } else {
+            // User exists in Auth but not in Firestore (shouldn't happen if registration is correct)
+            console.warn("User found in Auth but not in Firestore 'users' collection.");
+            setUser(null);
+            setView('login');
+          }
+        } catch (err) {
+          console.error("Error fetching user profile:", err);
+          setUser(null);
+          setView('login');
+        }
+      } else {
+        setUser(null);
+        setView('login');
       }
-    } catch (err) {
-      console.error("Failed to load user", err);
-    }
+    });
+    return () => unsubscribe();
+  }, []);
 
-    // Subscribe to Firestore reports
+  // Reports Sync Effect (Keep this as is, it's correct)
+  useEffect(() => {
     const q = query(collection(db, "reports"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const liveReports = snapshot.docs.map(doc => ({
@@ -52,7 +72,6 @@ const App: React.FC = () => {
     }, (error) => {
       console.error("Firestore sync error:", error);
     });
-
     return () => unsubscribe();
   }, []);
 
@@ -62,21 +81,10 @@ const App: React.FC = () => {
     }
   }, [user, reports]);
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password || !email) {
       return alert("Please fill in all the boxes.");
-    }
-
-    let usersDb = [];
-    try {
-      usersDb = JSON.parse(localStorage.getItem('urbix_users_db') || '[]');
-    } catch (err) {
-      usersDb = [];
-    }
-
-    if (usersDb.some((u: User) => u.username.toLowerCase() === username.toLowerCase())) {
-      return alert("This name is already taken. Please choose another one.");
     }
 
     if (role === UserRole.ADMIN) {
@@ -85,54 +93,58 @@ const App: React.FC = () => {
       }
     }
 
-    const newUser: User = {
-      username: username.trim(),
-      password,
-      email: email.trim(),
-      phone: phone.trim(),
-      role,
-      createdAt: Date.now()
-    };
-
-    usersDb.push(newUser);
-    localStorage.setItem('urbix_users_db', JSON.stringify(usersDb));
-    setUser(newUser);
-    localStorage.setItem('urbix_user', JSON.stringify(newUser));
-    setView('main');
-  };
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username || !password) return alert("Enter name and password.");
-
-    let usersDb = [];
     try {
-      usersDb = JSON.parse(localStorage.getItem('urbix_users_db') || '[]');
-    } catch (err) {
-      usersDb = [];
-    }
+      // 1. Create Auth User
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const uid = userCredential.user.uid;
 
-    const found = usersDb.find((u: User) =>
-      u.username.toLowerCase() === username.toLowerCase().trim() &&
-      u.password === password
-    );
+      // 2. Prepare User Object
+      const newUser: User = {
+        username: username.trim(),
+        // Do not store password in database!
+        password: '***',
+        email: email.trim(),
+        phone: phone.trim(),
+        role,
+        createdAt: Date.now()
+      };
 
-    if (found) {
-      setUser(found);
-      localStorage.setItem('urbix_user', JSON.stringify(found));
-      setView('main');
-    } else {
-      alert("Wrong name or password. Please try again.");
+      // 3. Store User Profile in Firestore
+      await setDoc(doc(db, "users", uid), newUser);
+
+      // State update handled by onAuthStateChanged
+    } catch (err: any) {
+      console.error("Registration failed:", err);
+      alert(err.message || "Registration failed. Please try again.");
     }
   };
 
-  const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('urbix_user');
-    setView('login');
-    setUsername('');
-    setPassword('');
-    setAdminKey('');
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) return alert("Enter email and password.");
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // State update handled by onAuthStateChanged
+    } catch (err: any) {
+      console.error("Login failed:", err);
+      alert("Wrong email or password. Please try again.");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      // View switching handled by onAuthStateChanged
+      setUsername('');
+      setPassword('');
+      setEmail('');
+      setPhone('');
+      setAdminKey('');
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
   };
 
   const handleReportSubmit = async (partialReport: Partial<CivicReport>) => {
@@ -245,12 +257,12 @@ const App: React.FC = () => {
                   <h2 className="text-5xl font-black text-white mb-8">{view === 'login' ? 'Welcome' : 'Join Us'}</h2>
                   <form onSubmit={view === 'login' ? handleLogin : handleRegister} className="space-y-6">
                     <div className="space-y-4">
-                      <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-6 py-5 rounded-2xl border border-white/5 bg-slate-800 text-white font-bold outline-none focus:border-indigo-500 transition-colors" placeholder="User Name" required />
+                      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-6 py-5 rounded-text border border-white/5 bg-slate-800 text-white font-bold outline-none focus:border-indigo-500 transition-colors" placeholder="Email Address" required />
                       <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-6 py-5 rounded-2xl border border-white/5 bg-slate-800 text-white font-bold outline-none focus:border-indigo-500 transition-colors" placeholder="Password" required />
                     </div>
                     {view === 'register' && (
                       <div className="space-y-4">
-                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-6 py-4 rounded-xl border border-white/5 bg-slate-800 text-white font-bold outline-none focus:border-indigo-500 transition-colors" placeholder="Email Address" required />
+                        <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-6 py-4 rounded-xl border border-white/5 bg-slate-800 text-white font-bold outline-none focus:border-indigo-500 transition-colors" placeholder="Choose User Name" required />
                         <div className="grid grid-cols-2 gap-2 p-1 bg-slate-800 rounded-2xl">
                           <button type="button" onClick={() => setRole(UserRole.CITIZEN)} className={`py-3 text-xs font-black uppercase rounded-xl transition-all ${role === UserRole.CITIZEN ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Citizen</button>
                           <button type="button" onClick={() => setRole(UserRole.ADMIN)} className={`py-3 text-xs font-black uppercase rounded-xl transition-all ${role === UserRole.ADMIN ? 'bg-white text-black shadow-lg' : 'text-slate-500'}`}>Admin</button>
