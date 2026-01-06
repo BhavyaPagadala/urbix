@@ -10,6 +10,8 @@ import { ADMIN_SECRET_KEY, MOCK_REPORTS_INITIAL } from './constants';
 import { generateUrbanPulseSummary, analyzeCivicReport } from './services/geminiService';
 import { Logo } from './components/Logo';
 import { Language, translations } from './translations';
+import { db } from './services/firebase';
+import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, Timestamp, setDoc } from 'firebase/firestore';
 
 const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
@@ -19,7 +21,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<'login' | 'register' | 'main'>('login');
   const [language, setLanguage] = useState<Language>('en');
   const t = translations[language];
-  
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -28,31 +30,31 @@ const App: React.FC = () => {
   const [adminKey, setAdminKey] = useState('');
 
   useEffect(() => {
+    // Load user from local storage
     try {
-      const savedReports = localStorage.getItem('urbix_reports');
-      if (savedReports) {
-        setReports(JSON.parse(savedReports));
-      } else {
-        setReports(MOCK_REPORTS_INITIAL.map(r => ({ 
-          ...r, 
-          department: 'City Office',
-          history: [{ timestamp: r.createdAt, status: r.status as ReportStatus, actor: 'system' }]
-        })) as CivicReport[]);
-      }
-
       const savedUser = localStorage.getItem('urbix_user');
       if (savedUser) {
         setUser(JSON.parse(savedUser));
         setView('main');
       }
     } catch (err) {
-      console.error("Failed to load initial data", err);
+      console.error("Failed to load user", err);
     }
-  }, []);
 
-  useEffect(() => {
-    localStorage.setItem('urbix_reports', JSON.stringify(reports));
-  }, [reports]);
+    // Subscribe to Firestore reports
+    const q = query(collection(db, "reports"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const liveReports = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as CivicReport[];
+      setReports(liveReports);
+    }, (error) => {
+      console.error("Firestore sync error:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (user?.role === UserRole.ADMIN && reports.length > 0) {
@@ -65,7 +67,7 @@ const App: React.FC = () => {
     if (!username || !password || !email) {
       return alert("Please fill in all the boxes.");
     }
-    
+
     let usersDb = [];
     try {
       usersDb = JSON.parse(localStorage.getItem('urbix_users_db') || '[]');
@@ -83,13 +85,13 @@ const App: React.FC = () => {
       }
     }
 
-    const newUser: User = { 
-      username: username.trim(), 
-      password, 
-      email: email.trim(), 
-      phone: phone.trim(), 
-      role, 
-      createdAt: Date.now() 
+    const newUser: User = {
+      username: username.trim(),
+      password,
+      email: email.trim(),
+      phone: phone.trim(),
+      role,
+      createdAt: Date.now()
     };
 
     usersDb.push(newUser);
@@ -110,8 +112,8 @@ const App: React.FC = () => {
       usersDb = [];
     }
 
-    const found = usersDb.find((u: User) => 
-      u.username.toLowerCase() === username.toLowerCase().trim() && 
+    const found = usersDb.find((u: User) =>
+      u.username.toLowerCase() === username.toLowerCase().trim() &&
       u.password === password
     );
 
@@ -133,65 +135,65 @@ const App: React.FC = () => {
     setAdminKey('');
   };
 
-  const handleReportSubmit = (partialReport: Partial<CivicReport>) => {
-    const newReport: CivicReport = {
-      id: `rep-${Date.now()}`,
-      reporter: user?.username || 'user',
-      title: partialReport.title || 'No Title',
-      description: partialReport.description || '',
-      category: partialReport.category || 'Other',
-      department: partialReport.department || 'City Office',
-      sentiment: partialReport.sentiment || Sentiment.NEUTRAL,
-      status: ReportStatus.PENDING,
-      location: partialReport.location || { locality: 'Main Area' },
-      image: partialReport.image,
-      createdAt: Date.now(),
-      aiInsights: partialReport.aiInsights,
-      history: [{ timestamp: Date.now(), status: ReportStatus.PENDING, actor: user?.username || 'user' }]
-    };
-    setReports(prev => [newReport, ...prev]);
+  const handleReportSubmit = async (partialReport: Partial<CivicReport>) => {
+    try {
+      await addDoc(collection(db, "reports"), {
+        reporter: user?.username || 'user',
+        title: partialReport.title || 'No Title',
+        description: partialReport.description || '',
+        category: partialReport.category || 'Other',
+        department: partialReport.department || 'City Office',
+        sentiment: partialReport.sentiment || Sentiment.NEUTRAL,
+        status: ReportStatus.PENDING,
+        location: partialReport.location || { locality: 'Main Area' },
+        image: partialReport.image || null,
+        createdAt: Date.now(),
+        aiInsights: partialReport.aiInsights || null,
+        history: [{ timestamp: Date.now(), status: ReportStatus.PENDING, actor: user?.username || 'user' }]
+      });
+    } catch (e) {
+      console.error("Error adding report: ", e);
+      alert("Failed to save report to database.");
+    }
   };
 
   const handleUpdateStatus = async (id: string, newStatus: ReportStatus) => {
-    let reportToAnalyze: CivicReport | undefined;
+    const report = reports.find(r => r.id === id);
+    if (!report) return;
 
-    setReports(prevReports => {
-      const report = prevReports.find(r => r.id === id);
-      if (!report) return prevReports;
+    if (report.status === ReportStatus.RESOLVED &&
+      (newStatus === ReportStatus.PENDING || newStatus === ReportStatus.REVIEWING)) {
+      alert("This problem is already fixed. You cannot change it back to 'Pending' or 'Reviewing'.");
+      return;
+    }
 
-      if (report.status === ReportStatus.RESOLVED && 
-         (newStatus === ReportStatus.PENDING || newStatus === ReportStatus.REVIEWING)) {
-        alert("This problem is already fixed. You cannot change it back to 'Pending' or 'Reviewing'.");
-        return prevReports;
-      }
+    if (report.status === ReportStatus.DISMISSED &&
+      (newStatus === ReportStatus.PENDING || newStatus === ReportStatus.REVIEWING)) {
+      alert("This report was closed. You cannot mark it as pending again.");
+      return;
+    }
 
-      if (report.status === ReportStatus.DISMISSED && 
-         (newStatus === ReportStatus.PENDING || newStatus === ReportStatus.REVIEWING)) {
-        alert("This report was closed. You cannot mark it as pending again.");
-        return prevReports;
-      }
+    try {
+      const reportRef = doc(db, "reports", id);
+      const newHistory = [...(report.history || []), { timestamp: Date.now(), status: newStatus, actor: user?.username || 'admin' }];
 
-      reportToAnalyze = {
-        ...report,
+      // 1. Immediate status update
+      await updateDoc(reportRef, {
         status: newStatus,
-        history: [...(report.history || []), { timestamp: Date.now(), status: newStatus, actor: user?.username || 'admin' }]
-      };
+        history: newHistory
+      });
 
-      return prevReports.map(r => r.id === id ? reportToAnalyze! : r);
-    });
+      // 2. AI Re-analysis
+      const aiUpdate = await analyzeCivicReport(report.description, report.image);
+      await updateDoc(reportRef, {
+        category: aiUpdate.category,
+        sentiment: aiUpdate.sentiment as Sentiment,
+        aiInsights: `[Status: ${newStatus}] ${aiUpdate.summary}`
+      });
 
-    if (reportToAnalyze) {
-      try {
-        const aiUpdate = await analyzeCivicReport(reportToAnalyze.description, reportToAnalyze.image);
-        setReports(prev => prev.map(r => r.id === id ? {
-          ...r,
-          category: aiUpdate.category,
-          sentiment: aiUpdate.sentiment as Sentiment,
-          aiInsights: `[Status: ${newStatus}] ${aiUpdate.summary}`
-        } : r));
-      } catch (err) {
-        console.error("AI automated re-analysis failed:", err);
-      }
+    } catch (err) {
+      console.error("Failed to update status in DB:", err);
+      // alert("Database update failed.");
     }
   };
 
@@ -204,7 +206,7 @@ const App: React.FC = () => {
       {!showSplash && (
         <AnimatePresence mode="wait">
           {(view === 'login' || view === 'register') ? (
-            <motion.div 
+            <motion.div
               key="auth"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -219,7 +221,7 @@ const App: React.FC = () => {
                     </div>
                     <h1 className="text-4xl font-black tracking-tighter uppercase">URBIX</h1>
                   </div>
-                  
+
                   <div className="max-w-2xl">
                     <span className="text-indigo-400 font-bold uppercase tracking-widest text-xs mb-6 block">Simple City Help</span>
                     <h2 className="text-8xl font-black tracking-tighter leading-[0.85] mb-10">
@@ -230,11 +232,11 @@ const App: React.FC = () => {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="relative z-10 flex bg-slate-800/50 p-2 rounded-2xl w-fit">
-                    {(['en', 'hi', 'te'] as Language[]).map((lang) => (
-                      <button key={lang} onClick={() => setLanguage(lang)} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${language === lang ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>{lang}</button>
-                    ))}
+                  {(['en', 'hi', 'te'] as Language[]).map((lang) => (
+                    <button key={lang} onClick={() => setLanguage(lang)} className={`px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all ${language === lang ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>{lang}</button>
+                  ))}
                 </div>
               </div>
 
@@ -272,7 +274,7 @@ const App: React.FC = () => {
               </div>
             </motion.div>
           ) : (
-            <motion.div 
+            <motion.div
               key="main"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -289,20 +291,20 @@ const App: React.FC = () => {
                   </header>
                   <AnimatePresence mode="wait">
                     {user?.role === UserRole.ADMIN ? (
-                      <AdminDashboard 
-                        key="admin" 
-                        reports={reports} 
-                        onUpdateStatus={handleUpdateStatus} 
-                        pulseSummary={pulseSummary} 
-                        language={language} 
+                      <AdminDashboard
+                        key="admin"
+                        reports={reports}
+                        onUpdateStatus={handleUpdateStatus}
+                        pulseSummary={pulseSummary}
+                        language={language}
                       />
                     ) : (
-                      <CitizenInterface 
-                        key="citizen" 
-                        onReportSubmit={handleReportSubmit} 
-                        reports={reports} 
-                        username={user?.username || ''} 
-                        language={language} 
+                      <CitizenInterface
+                        key="citizen"
+                        onReportSubmit={handleReportSubmit}
+                        reports={reports}
+                        username={user?.username || ''}
+                        language={language}
                       />
                     )}
                   </AnimatePresence>
